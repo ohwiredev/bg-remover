@@ -3,10 +3,13 @@
 Remove image backgrounds and resize images in the browser. Everything runs client-side: images are never uploaded anywhere.
 
 - Background removal with [`@imgly/background-removal`](https://github.com/imgly/background-removal-js) (IS-Net segmentation on onnxruntime-web, WebGPU when available, multi-threaded WASM otherwise)
-- Three model sizes: Fast / Balanced / Best. Model files are fetched from IMG.LY's CDN on first use and then cached by the browser
+- Three model sizes: Fast / Balanced / Best. Model files are fetched from IMG.LY's CDN on first use and then cached by the browser. Balanced (fp16) runs on the CPU when the GPU lacks f16 shaders, where WebGPU would otherwise return an empty mask
+- The photo is shrunk to the model's 1024² input with proper area averaging, and the mask is scaled back up with pixel centers aligned
+- When the subject leaves a lot of background in a large photo, the model runs a second time on just the subject, giving its edges up to several times the detail
 - Edge refinement, applied after the model (and after brush edits), in a Web Worker:
   - **Snap to fine detail**: a fast color guided filter re-fits the upscaled mask to the full-resolution photo, removing the soft halo around hair and outlines. It only acts near the model's own soft edge, and backs off where subject and background colors are too similar to tell apart
   - **Remove color fringe**: Blur-Fusion foreground estimation recovers the subject's own colors in semi-transparent edge pixels, so the old background doesn't bleed through. Limited to thin edges between solid subject and clear background; wide areas the model left half-transparent keep their colors
+  - **Hard edge**: a crisp one-pixel anti-aliased cut along the mask's midline, for products and other solid objects
   - Shift edge / Feather / Contrast sliders for manual control
 - Refine with a brush: erase / restore with adjustable size and hardness, zoom and pan, undo/redo, and a faint overlay of the original to show what was removed
 - Crop to subject with padding

@@ -21,12 +21,14 @@ export type EdgeSettings = {
   feather: number
   /** 0–100: push soft edges toward a hard cut. */
   contrast: number
+  /** Cut along the mask's midline with a one-pixel anti-aliased edge, for solid objects. */
+  hard: boolean
 }
 
-export const DEFAULT_EDGES: EdgeSettings = { snap: true, decontaminate: true, shift: 0, feather: 0, contrast: 0 }
+export const DEFAULT_EDGES: EdgeSettings = { snap: true, decontaminate: true, shift: 0, feather: 0, contrast: 0, hard: false }
 
 export function isIdentity(s: EdgeSettings): boolean {
-  return !s.snap && !s.decontaminate && s.shift === 0 && s.feather === 0 && s.contrast === 0
+  return !s.snap && !s.decontaminate && s.shift === 0 && s.feather === 0 && s.contrast === 0 && !s.hard
 }
 
 /** Low-resolution work is done at about the model's own resolution. */
@@ -278,10 +280,40 @@ export function guidedAlpha(
   return out
 }
 
-/** Applies shift, feather and contrast to `alpha` in place. */
-export function adjustAlpha(alpha: Float32Array, w: number, h: number, s: Pick<EdgeSettings, 'shift' | 'feather' | 'contrast'>) {
+/**
+ * Turns a soft edge into a crisp one-pixel anti-aliased edge along its 0.5
+ * contour, in place. (α − 0.5) / |∇α| approximates the signed distance to that
+ * contour in pixels, so the result is equally sharp whether the model's edge
+ * was 2 or 10 pixels wide, and keeps its sub-pixel position. The gradient is
+ * also taken on a lightly blurred copy so pixel noise doesn't make it jagged;
+ * the steeper of the two wins, so an edge that's already narrow isn't over-sharpened.
+ */
+export function hardenEdge(alpha: Float32Array, w: number, h: number) {
+  const src = alpha.slice()
+  const g = new Float32Array(w * h)
+  boxBlur(src, w, h, 1, g, new Float32Array(w * h))
+  for (let y = 0; y < h; y++) {
+    const up = Math.max(0, y - 1) * w, down = Math.min(h - 1, y + 1) * w, dy = (down - up) / w
+    for (let x = 0; x < w; x++) {
+      const i = y * w + x
+      const a = alpha[i]
+      if (a <= 0 || a >= 1) continue
+      const left = Math.max(0, x - 1), right = Math.min(w - 1, x + 1)
+      const gx = (g[y * w + right] - g[y * w + left]) / (right - left)
+      const gy = (g[down + x] - g[up + x]) / dy
+      const rx = (src[y * w + right] - src[y * w + left]) / (right - left)
+      const ry = (src[down + x] - src[up + x]) / dy
+      const mag = Math.max(Math.hypot(gx, gy), Math.hypot(rx, ry))
+      alpha[i] = mag < 1e-6 ? (a >= 0.5 ? 1 : 0) : Math.min(1, Math.max(0, 0.5 + (a - 0.5) / mag))
+    }
+  }
+}
+
+/** Applies shift, hard edge, feather and contrast to `alpha` in place. */
+export function adjustAlpha(alpha: Float32Array, w: number, h: number, s: Pick<EdgeSettings, 'shift' | 'feather' | 'contrast' | 'hard'>) {
   const shift = Math.round(s.shift)
   if (shift !== 0) morph(alpha, w, h, Math.abs(shift), shift > 0)
+  if (s.hard) hardenEdge(alpha, w, h)
   if (s.feather > 0) {
     // Two box passes approximate a Gaussian.
     const r = Math.max(1, Math.round(s.feather / 2))
@@ -289,7 +321,7 @@ export function adjustAlpha(alpha: Float32Array, w: number, h: number, s: Pick<E
     boxBlur(alpha, w, h, r, alpha, tmp)
     boxBlur(alpha, w, h, r, alpha, tmp)
   }
-  if (s.contrast > 0) {
+  if (s.contrast > 0 && !s.hard) {
     const gain = 1 / (1 - Math.min(0.98, s.contrast / 100))
     for (let i = 0; i < alpha.length; i++) alpha[i] = Math.min(1, Math.max(0, (alpha[i] - 0.5) * gain + 0.5))
   }

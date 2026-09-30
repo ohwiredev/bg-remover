@@ -98,8 +98,7 @@ export function App() {
     let cancelled = false
     setError(null)
     setProgress({ stage: 'Starting', current: 0, total: 1 })
-    cutOut(source.file, model, (p) => !cancelled && setProgress(p))
-      .then((blob) => createImageBitmap(blob))
+    cutOut(source.bitmap, model, (p) => !cancelled && setProgress(p))
       .then((bitmap) => {
         if (cancelled) return bitmap.close()
         setCutout((prev) => {
@@ -423,7 +422,10 @@ export function App() {
                   />
                   <SliderInput label="Shift edge" value={edges.shift} min={-10} max={10} onChange={(shift) => setEdges((e) => ({ ...e, shift }))} suffix="px" />
                   <SliderInput label="Feather" value={edges.feather} min={0} max={20} onChange={(feather) => setEdges((e) => ({ ...e, feather }))} suffix="px" />
-                  <SliderInput label="Contrast" value={edges.contrast} min={0} max={100} onChange={(contrast) => setEdges((e) => ({ ...e, contrast }))} suffix="%" />
+                  <Switch checked={edges.hard} onChange={(hard) => setEdges((e) => ({ ...e, hard }))} label="Hard edge" />
+                  {!edges.hard && (
+                    <SliderInput label="Contrast" value={edges.contrast} min={0} max={100} onChange={(contrast) => setEdges((e) => ({ ...e, contrast }))} suffix="%" />
+                  )}
                   {edgedCurrent?.error && <p className="text-sm text-danger">Edge refinement failed: {edgedCurrent.error}</p>}
                 </Section>
               )}
@@ -565,7 +567,7 @@ function ProgressPill({ progress }: { progress: Progress | null }) {
   return (
     <div role="status" className="flex w-64 flex-col gap-2 rounded-2xl bg-bg-elevated px-4 py-3 shadow-float">
       <div className="flex justify-between text-sm">
-        <span className="font-medium">{downloading ? 'Downloading model' : 'Removing background'}</span>
+        <span className="font-medium">{downloading ? 'Downloading model' : progress?.stage === 'Refining subject' ? 'Refining subject' : 'Removing background'}</span>
         {pct !== null && <span className="text-fg-muted tabular-nums">{pct}%</span>}
       </div>
       <div className="h-1 overflow-hidden rounded-full bg-bg-sunken">
