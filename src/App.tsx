@@ -17,6 +17,7 @@ import {
   type Rect,
   type RenderOptions,
 } from './lib/image'
+import { DEFAULT_EDGES, isIdentity, refineEdges, type EdgeSettings } from './lib/edges'
 import { cutOut, MODEL_OPTIONS, type ModelQuality, type Progress } from './lib/removal'
 
 // Browsers start failing to allocate canvases somewhere above this.
@@ -26,6 +27,8 @@ type Source = { file: File; bitmap: ImageBitmap }
 type Cutout = { key: string; bitmap: ImageBitmap }
 /** A brush-edited cut-out, tied to the image + model it was made from. */
 type Refined = Cutout
+/** The final cut-out after edge refinement, tied to the bitmap and settings it came from. */
+type Edged = { base: ImageBitmap; key: string; bitmap: ImageBitmap | null; error?: string }
 type Result = { blob: Blob; url: string; width: number; height: number; inputs: RenderOptions }
 /** Either a fraction of the (cropped) image size, or exact pixels the user typed. */
 type OutputSize = { kind: 'scale'; factor: number } | { kind: 'custom'; width: number; height: number }
@@ -64,6 +67,8 @@ export function App() {
   const [showOriginal, setShowOriginal] = useState(false)
   const [refined, setRefined] = useState<Refined | null>(null)
   const [editing, setEditing] = useState(false)
+  const [edges, setEdges] = useState<EdgeSettings>(DEFAULT_EDGES)
+  const [edged, setEdged] = useState<Edged | null>(null)
 
   const fileKey = source ? `${source.file.name}:${source.file.size}:${source.file.lastModified}` : ''
   const cutoutKey = `${fileKey}:${model}`
@@ -117,15 +122,52 @@ export function App() {
   const baseBitmap = hasRefined ? refined!.bitmap : unrefinedBitmap
   const hasTransparency = hasCutout || hasRefined
 
+  // Edge refinement runs on top of the brush edits, so the brush always edits
+  // the raw mask. While new settings are processing, the previous result stays up.
+  const edgesKey = JSON.stringify(edges)
+  const refiningEdges = hasTransparency && !!baseBitmap && !isIdentity(edges)
+  const edgedCurrent = refiningEdges && edged?.base === baseBitmap ? edged : null
+  const edgesPending = refiningEdges && edgedCurrent?.key !== edgesKey
+  const outputBitmap = edgedCurrent?.bitmap ?? baseBitmap
+
+  useEffect(() => {
+    if (!refiningEdges || !source || !baseBitmap || (edged?.base === baseBitmap && edged.key === edgesKey)) return
+    let cancelled = false
+    const timer = setTimeout(() => {
+      refineEdges(source.bitmap, baseBitmap, JSON.parse(edgesKey) as EdgeSettings)
+        .then((bitmap) => {
+          if (!bitmap) return
+          if (cancelled) return bitmap.close()
+          setEdged((prev) => {
+            prev?.bitmap?.close()
+            return { base: baseBitmap, key: edgesKey, bitmap }
+          })
+        })
+        .catch((err: unknown) => {
+          console.error(err)
+          if (cancelled) return
+          const error = err instanceof Error ? err.message : String(err)
+          setEdged((prev) => {
+            prev?.bitmap?.close()
+            return { base: baseBitmap, key: edgesKey, bitmap: null, error }
+          })
+        })
+    }, 150)
+    return () => {
+      cancelled = true
+      clearTimeout(timer)
+    }
+  }, [refiningEdges, source, baseBitmap, edgesKey, edged])
+
   // Scanning pixels is the slow part, so it's memoized separately from padding.
   const subjectBounds = useMemo(
-    () => (hasTransparency && cropToSubject && baseBitmap ? findSubjectBounds(baseBitmap) : null),
-    [baseBitmap, hasTransparency, cropToSubject],
+    () => (hasTransparency && cropToSubject && outputBitmap ? findSubjectBounds(outputBitmap) : null),
+    [outputBitmap, hasTransparency, cropToSubject],
   )
   const crop: Rect | null = useMemo(() => {
-    if (!baseBitmap) return null
-    return subjectBounds ? padRect(subjectBounds, padding, baseBitmap) : fullRect(baseBitmap)
-  }, [baseBitmap, subjectBounds, padding])
+    if (!outputBitmap) return null
+    return subjectBounds ? padRect(subjectBounds, padding, outputBitmap) : fullRect(outputBitmap)
+  }, [outputBitmap, subjectBounds, padding])
 
   const target = useMemo(() => {
     if (!crop) return null
@@ -136,8 +178,8 @@ export function App() {
   // Re-render the output whenever any option changes. Debounced so typing in
   // the size fields doesn't re-encode on every keystroke.
   const renderInputs: RenderOptions | null = useMemo(
-    () => (baseBitmap && crop && target ? { source: baseBitmap, crop, ...target, background, format, quality } : null),
-    [baseBitmap, crop, target, background, format, quality],
+    () => (outputBitmap && crop && target ? { source: outputBitmap, crop, ...target, background, format, quality } : null),
+    [outputBitmap, crop, target, background, format, quality],
   )
   const resultIsStale = result?.inputs !== renderInputs
 
@@ -179,7 +221,7 @@ export function App() {
     if (next && target) setWidth(target.width)
   }
 
-  const canDownload = !!result && !working && !resultIsStale
+  const canDownload = !!result && !working && !resultIsStale && !edgesPending
   const download = useCallback(() => {
     if (!result || !source) return
     const a = document.createElement('a')
@@ -362,6 +404,30 @@ export function App() {
                 </div>
               </Section>
 
+              {hasTransparency && (
+                <Section
+                  title="Edges"
+                  aside={
+                    JSON.stringify(DEFAULT_EDGES) !== edgesKey && (
+                      <button type="button" onClick={() => setEdges(DEFAULT_EDGES)} className="pressable text-sm text-fg-muted hover:text-fg">
+                        Reset
+                      </button>
+                    )
+                  }
+                >
+                  <Switch checked={edges.snap} onChange={(snap) => setEdges((e) => ({ ...e, snap }))} label="Snap to fine detail" />
+                  <Switch
+                    checked={edges.decontaminate}
+                    onChange={(decontaminate) => setEdges((e) => ({ ...e, decontaminate }))}
+                    label="Remove color fringe"
+                  />
+                  <SliderInput label="Shift edge" value={edges.shift} min={-10} max={10} onChange={(shift) => setEdges((e) => ({ ...e, shift }))} suffix="px" />
+                  <SliderInput label="Feather" value={edges.feather} min={0} max={20} onChange={(feather) => setEdges((e) => ({ ...e, feather }))} suffix="px" />
+                  <SliderInput label="Contrast" value={edges.contrast} min={0} max={100} onChange={(contrast) => setEdges((e) => ({ ...e, contrast }))} suffix="%" />
+                  {edgedCurrent?.error && <p className="text-sm text-danger">Edge refinement failed: {edgedCurrent.error}</p>}
+                </Section>
+              )}
+
               <Section title="Size">
                 <div className="flex flex-wrap gap-1.5">
                   {SIZE_PRESETS.map((p) => (
@@ -458,7 +524,7 @@ export function App() {
                 className="pressable flex h-12 items-center justify-center gap-2 rounded-xl bg-accent font-medium text-accent-fg hover:opacity-90 disabled:opacity-40"
               >
                 <Icon name="download" size={18} />
-                {working ? 'Removing background…' : result && resultIsStale ? 'Updating…' : 'Download'}
+                {working ? 'Removing background…' : edgesPending ? 'Refining edges…' : result && resultIsStale ? 'Updating…' : 'Download'}
               </button>
             </div>
           </aside>
