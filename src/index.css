@@ -1,0 +1,133 @@
+@import "tailwindcss";
+
+/* One warm-neutral gray family, one accent. */
+:root {
+  color-scheme: light dark;
+  --color-bg: oklch(97.8% 0.003 90);
+  --color-bg-sunken: oklch(94.5% 0.004 90);
+  --color-bg-elevated: oklch(100% 0 0);
+  --color-fg: oklch(20% 0.006 90);
+  --color-fg-muted: oklch(50% 0.008 90);
+  --color-accent: oklch(52% 0.15 262);
+  --color-accent-fg: oklch(99% 0 0);
+  --color-accent-soft: oklch(52% 0.15 262 / 0.1);
+  --color-border: oklch(90% 0.005 90);
+  --color-danger: oklch(55% 0.19 25);
+  --checker-a: oklch(97% 0.002 90);
+  --checker-b: oklch(91% 0.003 90);
+  --image-outline: oklch(0 0 0 / 0.1);
+  --shadow-float: 0 1px 2px oklch(20% 0.01 90 / 0.06), 0 8px 24px -6px oklch(20% 0.01 90 / 0.18);
+  --font-sans: "Geist", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-bg: oklch(17% 0.004 90);
+    --color-bg-sunken: oklch(14% 0.004 90);
+    --color-bg-elevated: oklch(22% 0.005 90);
+    --color-fg: oklch(95% 0.004 90);
+    --color-fg-muted: oklch(70% 0.008 90);
+    --color-accent: oklch(70% 0.13 262);
+    --color-accent-fg: oklch(16% 0.01 262);
+    --color-accent-soft: oklch(70% 0.13 262 / 0.14);
+    --color-border: oklch(28% 0.006 90);
+    --color-danger: oklch(72% 0.16 25);
+    --checker-a: oklch(26% 0.003 90);
+    --checker-b: oklch(21% 0.003 90);
+    --image-outline: oklch(1 0 0 / 0.1);
+    --shadow-float: 0 1px 2px oklch(0% 0 0 / 0.3), 0 8px 24px -6px oklch(0% 0 0 / 0.5);
+  }
+}
+
+@theme inline {
+  --color-bg: var(--color-bg);
+  --color-bg-sunken: var(--color-bg-sunken);
+  --color-bg-elevated: var(--color-bg-elevated);
+  --color-fg: var(--color-fg);
+  --color-fg-muted: var(--color-fg-muted);
+  --color-accent: var(--color-accent);
+  --color-accent-fg: var(--color-accent-fg);
+  --color-accent-soft: var(--color-accent-soft);
+  --color-border: var(--color-border);
+  --color-danger: var(--color-danger);
+  --font-sans: var(--font-sans);
+  --shadow-float: var(--shadow-float);
+}
+
+body {
+  background: var(--color-bg);
+  color: var(--color-fg);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+/* Tactile press feedback for buttons. */
+.pressable {
+  transition-property: scale, background-color, color, opacity, box-shadow;
+  transition-duration: 150ms;
+  transition-timing-function: cubic-bezier(0.2, 0, 0, 1);
+}
+.pressable:active:not(:disabled) {
+  scale: 0.96;
+}
+
+.checker {
+  background-color: var(--checker-a);
+  background-image:
+    linear-gradient(45deg, var(--checker-b) 25%, transparent 25%),
+    linear-gradient(-45deg, var(--checker-b) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, var(--checker-b) 75%),
+    linear-gradient(-45deg, transparent 75%, var(--checker-b) 75%);
+  background-size: 16px 16px;
+  background-position: 0 0, 0 8px, 8px -8px, -8px 0;
+}
+
+.image-outline {
+  outline: 1px solid var(--image-outline);
+  outline-offset: -1px;
+}
+
+/* While the model runs: the image sits dimmed and a brighter band sweeps down it. */
+@keyframes scan {
+  from { mask-position: 0 100%; }
+  to { mask-position: 0 0; }
+}
+.scanning {
+  mask-image: linear-gradient(to bottom, rgb(0 0 0 / 0.35) 0%, rgb(0 0 0 / 0.35) 42%, #000 50%, rgb(0 0 0 / 0.35) 58%, rgb(0 0 0 / 0.35) 100%);
+  mask-size: 100% 300%;
+  animation: scan 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .scanning { animation: none; mask-position: 0 0; }
+  .pressable:active:not(:disabled) { scale: 1; }
+}
+
+/* Floating chrome over the canvas: a translucent material the image shows through. */
+.material {
+  background: color-mix(in oklch, var(--color-bg-elevated) 78%, transparent);
+  backdrop-filter: blur(20px) saturate(180%);
+  box-shadow: var(--shadow-float), inset 0 0 0 1px oklch(100% 0 0 / 0.06);
+}
+@media (prefers-reduced-transparency: reduce) {
+  .material { background: var(--color-bg-elevated); backdrop-filter: none; }
+}
+
+@keyframes editor-in {
+  from { opacity: 0; scale: 0.985; }
+}
+@keyframes rise-in {
+  from { opacity: 0; translate: 0 6px; }
+}
+.editor-in { animation: editor-in 220ms cubic-bezier(0.23, 1, 0.32, 1); }
+.rise-in { animation: rise-in 200ms cubic-bezier(0.23, 1, 0.32, 1); }
+@media (prefers-reduced-motion: reduce) {
+  @keyframes editor-in { from { opacity: 0; } }
+  @keyframes rise-in { from { opacity: 0; } }
+}
